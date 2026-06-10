@@ -3,7 +3,7 @@ title: "16th Place at DEF CON Quals 2026"
 description: "We managed to get 16th place at DEF CON Quals 2026! Making us the 2nd best european team."
 pubDate: "June 14 2026"
 heroImage: "/blog/defcon_quals26/scoreboard.png"
-author: "Popax21, Cherry, KuK"
+author: "Popax21, Cherry, Xer0, KuK"
 ---
 
 We’re pleased to share that our team managed to achieve 16th place at DEF CON Quals 2026.\
@@ -11,6 +11,7 @@ Even though this made use the 2nd best european team we, sadly missed out on qua
 Nevertheless, we want to share some writeups of the challenges we solved:
 + [Nodefs](#nodefs)
 + [Shelldiet](#shelldiet)
++ [My Favorite Instructions](#my-favorite-instructions)
 
 # nodefs
 
@@ -1710,3 +1711,371 @@ By the end we were submitting a diet-level of **0**, which is the floor, while m
 
 We could not realistically catch the Top 5 on the final scoreboard, because KotH accumulates points over the whole contest and we found the 0 too late to make up the earlier deficit, but holding the best-possible score for the remainder still pulled us up dramatically.
 
+# My Favorite Instructions
+
+Author: Xer0\
+Category: rev
+
+Description:
+> I have two favorite instructions and I'm not afraid to use them
+
+
+## Overview
+
+The interesting part of the challenge is not a standard cipher hidden in
+ordinary C. The verifier is a very large circuit built from two x86
+instructions, `bsr` and `bzhi`, used as ternary logic gates. The intended
+solve path is to recognize the ternary circuit structure, split the global
+predicate into independent chunks, and then reverse the high-level arithmetic
+being implemented by the larger chunks. (Probably lol)
+
+The final recovered structure is:
+
+- chunk1 checks the prefix `bbb{`.
+- chunk2_3 normalizes two 82-trit base-3 integers and checks their integer
+ product against a 168-trit target.
+- chunk4 normalizes 41 trits and checks 15 linear congruences modulo
+ `3^21 - 1`.
+- chunk5 and chunk6 are small enough to solve directly as SAT.
+
+## Input encoding
+
+The binary expects a 68-byte flag. In `main`, the bytes are converted into
+348 ternary digits, or trits. The conversion is little-endian base 3 for each
+integer chunk:
+
+| Flag bytes | Trits | Size |
+|---|---:|---:|
+| `flag[0:4]` | `0..19` | 4 independent bytes, 5 trits each |
+| `flag[4:20]` | `20..101` | 16-byte little-endian integer, 82 trits |
+| `flag[20:36]` | `102..183` | 16-byte little-endian integer, 82 trits |
+| `flag[36:44]` | `184..224` | 8-byte little-endian integer, 41 trits |
+| `flag[44:52]` | `225..265` | 8-byte little-endian integer, 41 trits |
+| `flag[52:68]` | `266..347` | 16-byte little-endian integer, 82 trits |
+
+The verifier function is `sub_11A0`. It returns trit value `2` when the flag is
+accepted. (Hint at what we need to achieve...)
+
+## Humble beginnings:
+Before I've never even known wth a trit is...
+
+Anyways; at the start a teammate hoped that angr could solve this. Since he was on a plane and couldn't download angr (lol) he figured out it would be some kind of VM or turing complete bs. (Which turned out to be true)
+
+My input: "Given this is a PPP challenge; could it be that it is some wird SAT subproblem? (Last plaid ctf there was a minimax sat challenge that base z3 could not solve)"
+
+Their answer: "Idk I am still working on lifting the circuit".
+We almost lost our mind trying to lift it but in the end we got a z3able circuit which..... RAM exploded immediately.
+
+Sooooo I tried to split them up into smaller subproblems which are easier to solve:
+
+
+## The ternary instruction trick?
+
+The function is enormous but most of it is
+made from `bsr` and `bzhi`.
+On values restricted to `{0,1,2}`, these
+instructions are ternary gates.
+(Google AI summary told me this + that it may be a 3SAT problem which is NP complete soooo I am doomed...)
+
+For `bsr old, src`, with `src` a trit:
+
+```text
+src = 0 -> keep old
+src = 1 -> 0
+src = 2 -> 1
+```
+
+For `bzhi src, idx`, with both operands trits:
+
+```text
+idx = 0 -> 0
+idx = 1 -> src mod 2
+idx = 2 -> src
+```
+
+That means the whole function can be emulated as a ternary circuit. I wrote a
+symbolic emulator in python and a faster generated C++ version. (Essentially dumping C code into a file and then compilin g it) The symbolic circuit had about 19 million ternary nodes.
+
+The important insight here was to stop treating the assembly as normal
+arithmetic and instead treat it as a netlist:
+
+```text
+input trits -> ternary gates -> one final trit
+```
+
+Each gate has a 3-by-3 truth table.
+I got the idea when I realized that the function returns 2!? on success.
+
+## Chunk decomposition
+
+At first, the full netlist is too large to solve directly. I traced backwards
+from the final output node and found that the verifier is mostly a conjunction
+of independent chunks. 
+
+The chunks are:
+| Chunk | Input trits | Flag bytes | Summary node | Needed value |
+|---|---:|---:|---:|---:|
+| chunk1 | `0..19` | `0..3` | `667` | `2` |
+| chunk2_3 | `20..183` | `4..35` | `2175325` | `2` |
+| chunk4 | `184..224` | `36..43` | `18230750` | `2` |
+| chunk5 | `225..265` | `44..51` | `18290107` | `2` |
+| chunk6 | `266..347` | `52..67` | `18953426` | `2` |
+
+I extracted per-chunk subnets and verified that each subnet matched the
+corresponding full-net summary node on random inputs. Without the split, SAT and SMT were both too slow or too memory-heavy.
+(Yet again; subproblems save our day :D)
+
+The equality checks are also implemented as ternary circuits. The accumulator
+ends at `2` only if every compared trit matches the target. Random wrong
+inputs almost always produce `0`.
+
+## First solving attempts
+
+The smaller chunks were easy once extracted:
+
+- chunk1 solved immediately and gave `bbb{`.
+- chunk5 solved as SAT and gave `ATDcm6d4`.
+- chunk6 solved as SAT and gave `hPe25PNGBdT9MK0}`.
+
+However z3 still did not work and I had to use cadical (one of our players works at JKU where they develop that one and he told me to lift the circuits to CNF and use that one... tbh not sure why but it was fast and did not use a lot of RAM.)
+
+The larger chunks did not work well with generic solvers:
+
+- Cadical on chunk2_3 and chunk4 stalled.
+- Z3 SMT encodings became huge and were killed by my oom ram linux killer bullshit.
+- Adding alphanumeric constraints helped the model but did not make CDCL solve
+ the hard chunks quickly enough.
+- Cube-and-conquer did not change the situation enough.
+
+"bbb{...??...ATDcm6d4hPe25PNGBdT9MK0} 
+2 chunks remain to be recovered
+but I think you guys can switch to a different challenge
+one chunk 2% remaining constraints and the other one at 61%"...
+Those chunks remained at 0% and 1% for a few hours before me killing them manually.
+
+Since I know what quirks SMT has, I figured this was some kind of complex math/linear equation systems with a lot of multiplications and whatever.
+
+## Reversing chunk4
+
+Chunk4 covers flag bytes `36..43`, encoded as 41 trits. In the assembly, this
+region starts near `0x1b3ca`. There is a normalization block followed by a
+loop that compares 21-trit states against tables in `.rodata`.
+
+The relevant tables are:
+
+```text
+T2 at 0x4e590
+T3 at 0x67930
+```
+
+At first I thought that this was surely some hashing algo/encryption because of the tables. Well too bad that was not the case because it did not look like any s-box or anything for either a MD or sponge construction.
+
+Then I thought it was some GF multiplication. Close enough but not entirely:
+The thing was
+that the 21-trit state behaves like a base-3 integer exponent modulo
+`3^21 - 1`.
+
+To identify this, I used a tracer similar to:
+
+```python
+class Chunk4Trace(Emulator):
+  def hook(self, st, pc, steps):
+    if pc == 0x1C0B0:
+      idx = st.mem.get(STACK_BASE + 0x278)
+      if isinstance(idx, int) and 0 <= idx < 15:
+        state = [int(st.mem.get(STACK_BASE + off, 0)) for off in STATE_OFFSETS]
+        self.round_states.append(state)
+```
+
+The trace captured the 21-trit accumulator for chosen inputs. After converting
+each 21-trit state to an integer
+
+```python
+E = sum(state[i] * 3**i for i in range(21))
+```
+
+basis probes showed this behavior:
+
+```text
+input trit value 1 -> add one table exponent
+input trit value 2 -> add twice that exponent
+state arithmetic -> modulo 3^21 - 1
+```
+
+The normalization shift for chunk4 is:
+
+```text
+22222100011222220022222001211221200101210
+```
+
+For raw trit `x[j]`, the normalized trit is:
+
+```text
+n[j] = x[j] + shift[j] mod 3
+```
+
+The recovered equations are:
+(AI FIGURED THIS ONE OUT BEFORE WE DID, I SIMPLY PASTED THE PROBE OUTPUTS FROM THE TRACER/EMULATOR AND IT TOLD ME THAT I AM STUPID FOR NOT SEING IT IMMEDIATELY)
+
+```text
+sum_j n[j] * T2[round, j] == T3[round] mod (3^21 - 1)
+```
+
+There are 15 equations and 41 ternary unknowns. I solved this as a small MILP:
+
+```python
+MOD = 3**21 - 1
+
+sum_j n[j] * coeff[round][j] - k[round] * MOD = target[round]
+0 <= n[j] <= 2
+```
+
+The solver produced:
+
+```text
+chunk4 = 6ue7npnj
+```
+
+and verifies with `chunk4.net output: 2`.
+
+## Reversing chunk2_3
+
+Chunk2_3 covers flag bytes `4..35`, which are two 16-byte integers encoded as
+two 82-trit halves:
+
+```text
+chunk2 raw trits: local 0..81
+chunk3 raw trits: local 82..163
+```
+
+The final comparison uses table `T1`:
+
+```text
+T1 at 0x4e050
+168 qwords, each qword is a target trit
+```
+
+The comparison happens after two large rolling loops around:
+
+```text
+0x5400
+0x10320
+```
+
+and the final compared state is available at:
+
+```text
+0x17cb6, stack + 0x1500
+```
+
+### Tracing the state
+
+I wrote another tracer for 2 and 3 modeled after the chunk4 tracer. It
+hooks:
+
+```text
+0x5400  first rolling loop entry
+0x10320 second rolling loop entry
+0x17cb6 final state before comparing against T1
+```
+
+At loop entry, four 168-trit stack arrays were useful:
+
+```text
+stack + 0x420  -> A
+stack + 0x0fc0 -> scratch
+stack + 0x1500 -> S
+stack + 0x1f80 -> B
+```
+
+Perturbing one input trit at a time showed:
+
+```text
+A depends only on the first 82-trit half.
+B depends only on the second 82-trit half.
+S is the final product/check state.
+```
+
+The zero-input normalized operands were:
+
+```text
+shift_A = 2202212000112100011200000001002120120012210020201211122202202211001122011000012220
+shift_B = 0010102212220000021112222021110200210201001010122021000102000121022120102100121100
+```
+
+For the raw input trits:
+
+```text
+A[i] = raw_chunk2[i] + shift_A[i] mod 3
+B[i] = raw_chunk3[i] + shift_B[i] mod 3
+```
+
+### The locality
+
+Since I did not want to manually lift all instructions and optimize them/whatever; I probed a lot again and sent it to GPT5.5 if it finds any patterns. This somehow worked again which was crazy to me.
+
+The first false hypothesis was that the final state was affine over
+GF(3). Basis probes disproved this:
+
+```text
+v = 2 was not equal to 2 * (v = 1)
+random affine predictions failed
+```
+
+The locality pattern was the real clue. Changing input digit `j` affected an
+approximately 80-wide window of output digits. That is exactly what happens
+when multiplying two base-3 integers: each input digit participates in a
+convolution window, and carries make the final digit function nonlinear and
+high-degree.
+
+So the hypothesis became:
+
+```text
+S_int = A_int * B_int
+```
+
+where:
+
+```python
+A_int = sum(A[i] * 3**i for i in range(82))
+B_int = sum(B[i] * 3**i for i in range(82))
+S_int = sum(S[i] * 3**i for i in range(168))
+```
+
+This verified exactly for the zero input and for random inputs:
+
+```text
+zero S == A*B: True
+r0  S == A*B: True
+r1  S == A*B: True
+...
+```
+
+That made chunk2_3 a factoring problem?!
+That exactly explains why cadical almost had it but not really.
+
+### Factoring T1
+
+The target integer is the base-3 interpretation of the 168 qwords at `0x4e050`:
+
+```text
+T1 = 69315507563335000426881137137421870202776768428849895573283403915458679359157
+```
+
+THANK GOD this was in factordb, otherwise....
+
+Its factors are:
+
+```text
+221815467394800111963839297593696124903
+312491767943139940981443826148003062019
+```
+
+The factors have to be assigned to `A` and `B`. Trying both orders is enough.
+One order cannot decode back to two 16-byte chunks; the swapped order is
+printable and verifies:
+
+```text
+order 0: rejected
+order 1: bytes=b'kQMM2FhlSBO4fEYFho5azaRrlTdxPsRx' net=2
+```
