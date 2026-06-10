@@ -3,12 +3,12 @@ title: "16th Place at DEF CON Quals 2026"
 description: "We managed to get 16th place at DEF CON Quals 2026! Making us the 2nd best european team."
 pubDate: "June 14 2026"
 heroImage: "/blog/defcon_quals26/scoreboard.png"
-author: "KuK, Popax21, Cherry"
+author: "Popax21, Cherry, KuK"
 ---
 
 We’re pleased to share that our team managed to achieve 16th place at DEF CON Quals 2026.\
-Even though this made use the 2nd best european team we sadly missed out on qualifing for Finals by 1 challenges.
-Nevertheless, we want to share some writeups of some of the challenges we solved:
+Even though this made use the 2nd best european team we, sadly missed out on qualifing for Finals by 1 challenge.
+Nevertheless, we want to share some writeups of the challenges we solved:
 + [Nodefs](#nodefs)
 + [Shelldiet](#shelldiet)
 
@@ -61,7 +61,7 @@ HOWEVER: `ScatterEntry`s are broken!
  
 -> writing to a buffer using a `bscatter` view will not bump `Extent.version`!
 
-PS: why is `commit` even a thing - just bump `ResolvedExtent.extent.version` directly ¯\_(ツ)_/¯
+PS: why is `commit` even a thing - just bump `ResolvedExtent.extent.version` directly `\_(ツ)_/`
 
 ### `bgather` route resolution is really weird
 
@@ -165,8 +165,6 @@ Final chain:
         3. `system("/readflag > /nfs/storage/.../flag.out")`
         4. flag gets placed in file accessible by user!
 4. READ FLAG: just read the `/flag.out` file once it appears to get a flag :)
-
-## Final
 
 *exploit.js*
 
