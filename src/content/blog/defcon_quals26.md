@@ -7,7 +7,7 @@ author: "Popax21, Cherry, Xer0, KuK"
 ---
 
 We’re pleased to share that our team managed to achieve 16th place at DEF CON Quals 2026.\
-Even though this made use the 2nd best european team we, sadly missed out on qualifing for Finals by 1 challenge.
+Even though this made use the 2nd best european team, we sadly missed out on qualifing for Finals by 1 challenge.
 Nevertheless, we want to share some writeups of the challenges we solved:
 + [Nodefs](#nodefs)
 + [Shelldiet](#shelldiet)
